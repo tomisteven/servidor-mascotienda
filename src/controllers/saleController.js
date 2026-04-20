@@ -12,13 +12,20 @@ const getSales = async (req, res) => {
     const { startDate, endDate, empleado, metodoPago } = req.query;
     let query = {};
 
-    if (startDate && endDate) {
-      query.fecha = {
-        $gte: new Date(startDate),
-        $lte: new Date(endDate)
-      };
-    } else if (startDate) {
-      query.fecha = { $gte: new Date(startDate) };
+    if (startDate || endDate) {
+      query.fecha = {};
+      if (startDate) {
+        // Si viene solo fecha YYYY-MM-DD, ajustamos al inicio del día en Arg (03:00 UTC)
+        const s = new Date(startDate);
+        if (startDate.length <= 10) s.setUTCHours(3, 0, 0, 0); 
+        query.fecha.$gte = s;
+      }
+      if (endDate) {
+        // Si viene solo fecha, ajustamos al fin del día en Arg (02:59:59 del día siguiente UTC)
+        const e = new Date(endDate);
+        if (endDate.length <= 10) e.setUTCHours(26, 59, 59, 999); // 23+3 = 26
+        query.fecha.$lte = e;
+      }
     }
 
     if (empleado) query.empleado = empleado;

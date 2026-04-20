@@ -2,6 +2,14 @@ const mongoose = require('mongoose');
 const Sale = require('../models/Sale');
 const Product = require('../models/Product');
 
+// Helper para obtener el inicio del día en Argentina (UTC-3)
+const getArgStartOfDay = (date = new Date()) => {
+  const argDateStr = date.toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
+  const [y, m, d] = argDateStr.split('-').map(Number);
+  // Argentina es UTC-3, por lo que 00:00 local es 03:00 UTC
+  return new Date(Date.UTC(y, m - 1, d, 3, 0, 0, 0));
+};
+
 // Helper para obtener el rango de fechas según el período
 const getDateRange = (period, dateStr, yearStr, monthStr) => {
   let start, end;
@@ -10,36 +18,38 @@ const getDateRange = (period, dateStr, yearStr, monthStr) => {
   switch (period) {
     case 'daily':
       if (dateStr) {
-        const [y, m, d] = dateStr.split('-');
-        start = new Date(y, m - 1, d, 0, 0, 0, 0);
+        const [y, m, d] = dateStr.split('-').map(Number);
+        start = new Date(Date.UTC(y, m - 1, d, 3, 0, 0, 0));
       } else {
-        start = new Date(now.setHours(0, 0, 0, 0));
+        start = getArgStartOfDay(now);
       }
-      end = new Date(start);
-      end.setHours(23, 59, 59, 999);
+      end = new Date(start.getTime() + 24 * 60 * 60 * 1000 - 1);
       break;
     case 'weekly':
+      // Para semanal, retrocedemos al principio de la semana según Arg
       if (dateStr) {
-        const [y, m, d] = dateStr.split('-');
-        start = new Date(y, m - 1, d, 0, 0, 0, 0);
+        const [y, m, d] = dateStr.split('-').map(Number);
+        start = new Date(Date.UTC(y, m - 1, d, 3, 0, 0, 0));
       } else {
-        start = new Date(now.setDate(now.getDate() - now.getDay()));
-        start.setHours(0, 0, 0, 0);
+        const argNow = getArgStartOfDay(now);
+        // getDay() devuelve el día de la semana (0-6)
+        // Pero tenemos que tener cuidado porque argNow es UTC (las 03:00)
+        // La fecha UTC de argNow es el mismo día civil que en Arg
+        const dayOfWeek = argNow.getUTCDay(); 
+        start = new Date(argNow.getTime() - dayOfWeek * 24 * 60 * 60 * 1000);
       }
-      end = new Date(start);
-      end.setDate(start.getDate() + 6);
-      end.setHours(23, 59, 59, 999);
+      end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000 - 1);
       break;
     case 'monthly':
-      const y = yearStr ? parseInt(yearStr) : now.getFullYear();
-      const m = monthStr ? parseInt(monthStr) - 1 : now.getMonth();
-      start = new Date(y, m, 1);
-      end = new Date(y, m + 1, 0, 23, 59, 59, 999);
+      const yStr = yearStr ? parseInt(yearStr) : parseInt(now.toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).split('-')[0]);
+      const mStr = monthStr ? parseInt(monthStr) - 1 : parseInt(now.toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).split('-')[1]) - 1;
+      start = new Date(Date.UTC(yStr, mStr, 1, 3, 0, 0, 0));
+      end = new Date(Date.UTC(yStr, mStr + 1, 0, 23, 59, 59, 999) + 3 * 3600 * 1000);
       break;
     case 'annual':
-      const yr = yearStr ? parseInt(yearStr) : now.getFullYear();
-      start = new Date(yr, 0, 1);
-      end = new Date(yr, 11, 31, 23, 59, 59, 999);
+      const yr = yearStr ? parseInt(yearStr) : parseInt(now.toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).split('-')[0]);
+      start = new Date(Date.UTC(yr, 0, 1, 3, 0, 0, 0));
+      end = new Date(Date.UTC(yr, 11, 31, 23, 59, 59, 999) + 3 * 3600 * 1000);
       break;
     default:
       start = new Date(0);
@@ -216,12 +226,11 @@ const getTopProductsReport = async (req, res) => {
 // @route   GET /api/reports/summary
 const getDashboardSummary = async (req, res) => {
   try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
+    const todayStart = getArgStartOfDay();
+    
     const matchStage = {
       $match: {
-        fecha: { $gte: today },
+        fecha: { $gte: todayStart },
         estado: 'completada'
       }
     };
@@ -302,11 +311,157 @@ const getDashboardSummary = async (req, res) => {
   }
 };
 
+// @desc    Estadísticas Globales (Stock y Ventas Históricas)
+// @route   GET /api/reports/global-stats
+const getGlobalStats = async (req, res) => {
+  try {
+    // 1. Estadísticas de Productos
+    const totalProducts = await Product.countDocuments({ activo: true });
+    
+    // Valor del Stock (Costo y Venta)
+    const inventoryVal = await Product.aggregate([
+      { $match: { activo: true } },
+      {
+        $group: {
+          _id: null,
+          totalCost: { $sum: { $multiply: ['$stock', '$precioCompra'] } },
+          totalSalesValue: { $sum: { $multiply: ['$stock', '$precioVenta'] } }
+        }
+      }
+    ]);
+
+    // Breakdown por Categoría
+    const categoryBreakdown = await Product.aggregate([
+      { $match: { activo: true } },
+      {
+        $group: {
+          _id: '$categoria',
+          count: { $sum: 1 },
+          stockTotal: { $sum: '$stock' },
+          valorCoste: { $sum: { $multiply: ['$stock', '$precioCompra'] } }
+        }
+      },
+      {
+        $lookup: {
+          from: 'categories',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'categoriaInfo'
+        }
+      },
+      { $unwind: '$categoriaInfo' },
+      {
+        $project: {
+          nombre: '$categoriaInfo.nombre',
+          count: 1,
+          stockTotal: 1,
+          valorCoste: 1
+        }
+      },
+      { $sort: { valorCoste: -1 } }
+    ]);
+
+    // 2. Estadísticas de Ventas Históricas (Solo completadas)
+    const saleStats = await Sale.aggregate([
+      { $match: { estado: 'completada' } },
+      { $unwind: '$items' },
+      {
+        $group: {
+          _id: '$_id',
+          totalFinal: { $first: '$totalFinal' },
+          totalCosto: { $sum: { $multiply: ['$items.precioCompraHisto', '$items.cantidad'] } }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          count: { $sum: 1 },
+          billing: { $sum: '$totalFinal' },
+          cost: { $sum: '$totalCosto' }
+        }
+      }
+    ]);
+
+    const stats = saleStats[0] || { count: 0, billing: 0, cost: 0 };
+
+    res.json({
+      productos: {
+        total: totalProducts,
+        valorCoste: inventoryVal[0]?.totalCost || 0,
+        valorVenta: inventoryVal[0]?.totalSalesValue || 0,
+        breakdown: categoryBreakdown
+      },
+      ventas: {
+        totalCount: stats.count,
+        facturacionTotal: stats.billing,
+        gananciaTotal: stats.billing - stats.cost
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Error al obtener estadísticas globales' });
+  }
+};
+
+// @desc    Data para el heatmap de ventas (facturación y ganancia diaria)
+// @route   GET /api/reports/sales-heatmap
+const getSalesHeatmap = async (req, res) => {
+  try {
+    const months = req.query.months || 6;
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setMonth(startDate.getMonth() - months);
+    
+    // Ajustar al inicio del día en Arg (UTC-3)
+    const [y, m, d] = startDate.toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).split('-').map(Number);
+    const startDateArg = new Date(Date.UTC(y, m - 1, d, 3, 0, 0, 0));
+
+    const heatmapData = await Sale.aggregate([
+      {
+        $match: {
+          fecha: { $gte: startDateArg, $lte: endDate },
+          estado: 'completada'
+        }
+      },
+      { $unwind: '$items' },
+      {
+        $group: {
+          _id: '$_id',
+          totalFinal: { $first: '$totalFinal' },
+          fecha: { $first: '$fecha' },
+          costoVenta: { $sum: { $multiply: ['$items.precioCompraHisto', '$items.cantidad'] } }
+        }
+      },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$fecha", timezone: "America/Argentina/Buenos_Aires" } },
+          total: { $sum: '$totalFinal' },
+          costo: { $sum: '$costoVenta' }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          date: '$_id',
+          total: 1,
+          profit: { $subtract: ['$total', '$costo'] }
+        }
+      },
+      { $sort: { date: 1 } }
+    ]);
+
+    res.json(heatmapData);
+  } catch (error) {
+    res.status(500).json({ message: 'Error al obtener datos del heatmap' });
+  }
+};
+
 module.exports = {
   getDailyReport,
   getWeeklyReport,
   getMonthlyReport,
   getAnnualReport,
   getTopProductsReport,
-  getDashboardSummary
+  getDashboardSummary,
+  getGlobalStats,
+  getSalesHeatmap
 };
