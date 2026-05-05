@@ -428,6 +428,7 @@ const getSalesHeatmap = async (req, res) => {
           _id: '$_id',
           totalFinal: { $first: '$totalFinal' },
           fecha: { $first: '$fecha' },
+          metodoPago: { $first: '$metodoPago' },
           costoVenta: { $sum: { $multiply: ['$items.precioCompraHisto', '$items.cantidad'] } }
         }
       },
@@ -435,7 +436,10 @@ const getSalesHeatmap = async (req, res) => {
         $group: {
           _id: { $dateToString: { format: "%Y-%m-%d", date: "$fecha", timezone: "America/Argentina/Buenos_Aires" } },
           total: { $sum: '$totalFinal' },
-          costo: { $sum: '$costoVenta' }
+          costo: { $sum: '$costoVenta' },
+          efectivo: { $sum: { $cond: [{ $eq: ['$metodoPago', 'efectivo'] }, '$totalFinal', 0] } },
+          tarjeta: { $sum: { $cond: [{ $eq: ['$metodoPago', 'tarjeta'] }, '$totalFinal', 0] } },
+          transferencia: { $sum: { $cond: [{ $eq: ['$metodoPago', 'transferencia'] }, '$totalFinal', 0] } }
         }
       },
       {
@@ -443,7 +447,10 @@ const getSalesHeatmap = async (req, res) => {
           _id: 0,
           date: '$_id',
           total: 1,
-          profit: { $subtract: ['$total', '$costo'] }
+          profit: { $subtract: ['$total', '$costo'] },
+          efectivo: 1,
+          tarjeta: 1,
+          transferencia: 1
         }
       },
       { $sort: { date: 1 } }
