@@ -299,12 +299,49 @@ const getDashboardSummary = async (req, res) => {
       { $sort: { _id: 1 } }
     ]);
 
+    // Datos del mes actual
+    const now = new Date();
+    const [y, m] = now.toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).split('-').map(Number);
+    const monthStart = new Date(Date.UTC(y, m - 1, 1, 3, 0, 0, 0));
+
+    const monthlyStats = await Sale.aggregate([
+      {
+        $match: {
+          fecha: { $gte: monthStart },
+          estado: 'completada'
+        }
+      },
+      { $unwind: '$items' },
+      {
+        $group: {
+          _id: '$_id',
+          totalFinal: { $first: '$totalFinal' },
+          costoVenta: { $sum: { $multiply: ['$items.precioCompraHisto', '$items.cantidad'] } }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalVentas: { $sum: 1 },
+          montoTotal: { $sum: '$totalFinal' },
+          costoTotal: { $sum: '$costoVenta' }
+        }
+      }
+    ]);
+
+    const mStats = monthlyStats[0] || { totalVentas: 0, montoTotal: 0, costoTotal: 0 };
+
     res.json({
       ventasHoy: stats.totalVentas,
       facturacionHoy: stats.montoTotal,
       gananciaHoy,
       topProducts: topToday,
-      ventasPorHora
+      ventasPorHora,
+      mes: {
+        ventas: mStats.totalVentas,
+        facturacion: mStats.montoTotal,
+        ganancia: mStats.montoTotal - mStats.costoTotal
+      }
     });
   } catch (error) {
     res.status(500).json({ message: 'Error al generar resumen' });

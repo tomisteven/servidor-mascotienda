@@ -320,6 +320,17 @@ const getProductsWithoutMovement = async (req, res) => {
   }
 };
 
+const getPublicCatalog = async (req, res) => {
+  try {
+    const products = await Product.find({ activo: true })
+      .populate('categoria', 'nombre color')
+      .sort({ nombre: 1 });
+    res.json(products);
+  } catch (error) {
+    res.status(500).json({ message: 'Error al obtener catálogo' });
+  }
+};
+
 module.exports = {
   getProducts,
   getProductById,
@@ -329,5 +340,6 @@ module.exports = {
   adjustStock,
   getLowStockProducts,
   bulkAction,
-  getProductsWithoutMovement
+  getProductsWithoutMovement,
+  getPublicCatalog
 };

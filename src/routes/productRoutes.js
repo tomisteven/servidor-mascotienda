@@ -10,8 +10,12 @@ const {
   getLowStockProducts,
   bulkAction,
   getProductsWithoutMovement,
+  getPublicCatalog,
 } = require('../controllers/productController');
 const { protect, admin } = require('../middlewares/auth');
+
+router.route('/public/catalog')
+  .get(getPublicCatalog);
 
 router.route('/low-stock')
   .get(protect, getLowStockProducts);
