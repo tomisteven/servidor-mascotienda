@@ -150,10 +150,10 @@ const seedNuevosProductos = async () => {
 
       for (const p of grupo.productos) {
         // Normalizar nombre para búsqueda (ignorar mayúsculas y espacios extras)
-        const existente = await Product.findOne({ 
-          nombre: { $regex: new RegExp(`^${p.nombre.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } 
+        const existente = await Product.findOne({
+          nombre: { $regex: new RegExp(`^${p.nombre.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
         });
-        
+
         if (existente) {
           console.log(`  ⚠️  Ya existe: ${p.nombre}`);
           totalOmitidos++;

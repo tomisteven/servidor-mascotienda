@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+ const mongoose = require('mongoose');
 const Sale = require('../models/Sale');
 const Product = require('../models/Product');
 
@@ -402,6 +402,146 @@ const getGlobalStats = async (req, res) => {
   }
 };
 
+// @desc    Estadísticas completas de ventas por producto
+// @route   GET /api/reports/sales-stats
+const getSalesStats = async (req, res) => {
+  try {
+    const productSales = await Sale.aggregate([
+      { $match: { estado: 'completada' } },
+      { $unwind: '$items' },
+      {
+        $group: {
+          _id: '$items.producto',
+          cantidadVendida: { $sum: '$items.cantidad' },
+          ingresosGenerados: { $sum: '$items.subtotal' },
+          costoTotal: { $sum: { $multiply: ['$items.precioCompraHisto', '$items.cantidad'] } },
+          cantidadUnidad: {
+            $sum: {
+              $cond: [
+                { $ne: ['$items.esVentaSuelta', true] },
+                '$items.cantidad',
+                0
+              ]
+            }
+          },
+          cantidadSuelta: {
+            $sum: {
+              $cond: [
+                { $eq: ['$items.esVentaSuelta', true] },
+                { $ifNull: ['$items.kilosVendidos', 0] },
+                0
+              ]
+            }
+          },
+          ingresosUnidad: {
+            $sum: {
+              $cond: [
+                { $ne: ['$items.esVentaSuelta', true] },
+                '$items.subtotal',
+                0
+              ]
+            }
+          },
+          ingresosSuelta: {
+            $sum: {
+              $cond: [
+                { $eq: ['$items.esVentaSuelta', true] },
+                '$items.subtotal',
+                0
+              ]
+            }
+          }
+        }
+      },
+      {
+        $lookup: {
+          from: 'products',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'productoInfo'
+        }
+      },
+      { $unwind: '$productoInfo' },
+      {
+        $lookup: {
+          from: 'categories',
+          localField: 'productoInfo.categoria',
+          foreignField: '_id',
+          as: 'categoriaInfo'
+        }
+      },
+      { $unwind: '$categoriaInfo' },
+      {
+        $project: {
+          _id: 1,
+          cantidadVendida: 1,
+          ingresosGenerados: 1,
+          costoTotal: 1,
+          cantidadUnidad: 1,
+          cantidadSuelta: 1,
+          ingresosUnidad: 1,
+          ingresosSuelta: 1,
+          ganancia: { $subtract: ['$ingresosGenerados', '$costoTotal'] },
+          margen: {
+            $cond: [
+              { $eq: ['$ingresosGenerados', 0] },
+              0,
+              { $multiply: [{ $divide: [{ $subtract: ['$ingresosGenerados', '$costoTotal'] }, '$ingresosGenerados'] }, 100] }
+            ]
+          },
+          nombre: '$productoInfo.nombre',
+          sku: '$productoInfo.sku',
+          imagen: '$productoInfo.imagen',
+          precioVentaActual: '$productoInfo.precioVenta',
+          precioCompraActual: '$productoInfo.precioCompra',
+          stockActual: '$productoInfo.stock',
+          categoria: '$categoriaInfo.nombre',
+          activo: '$productoInfo.activo'
+        }
+      },
+      { $sort: { cantidadVendida: -1 } }
+    ]);
+
+    const totalSummary = await Sale.aggregate([
+      { $match: { estado: 'completada' } },
+      { $unwind: '$items' },
+      {
+        $group: {
+          _id: '$_id',
+          totalFinal: { $first: '$totalFinal' },
+          costoVenta: { $sum: { $multiply: ['$items.precioCompraHisto', '$items.cantidad'] } }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalVentas: { $sum: 1 },
+          montoTotal: { $sum: '$totalFinal' },
+          costoTotal: { $sum: '$costoVenta' }
+        }
+      }
+    ]);
+
+    const summary = totalSummary[0] || { totalVentas: 0, montoTotal: 0, costoTotal: 0 };
+    const productosConVentas = productSales.filter(p => p.cantidadVendida > 0).length;
+
+    res.json({
+      summary: {
+        totalVentas: summary.totalVentas,
+        facturacionTotal: summary.montoTotal,
+        costoTotal: summary.costoTotal,
+        gananciaTotal: summary.montoTotal - summary.costoTotal,
+        margenGeneral: summary.montoTotal > 0 ? ((summary.montoTotal - summary.costoTotal) / summary.montoTotal * 100) : 0,
+        totalProductos: productSales.length,
+        productosConVentas
+      },
+      products: productSales
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Error al obtener estadísticas de ventas' });
+  }
+};
+
 // @desc    Data para el heatmap de ventas (facturación y ganancia diaria)
 // @route   GET /api/reports/sales-heatmap
 const getSalesHeatmap = async (req, res) => {
@@ -470,5 +610,6 @@ module.exports = {
   getTopProductsReport,
   getDashboardSummary,
   getGlobalStats,
+  getSalesStats,
   getSalesHeatmap
 };
