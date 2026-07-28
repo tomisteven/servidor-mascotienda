@@ -13,6 +13,11 @@ const productRoutes = require('./src/routes/productRoutes');
 const saleRoutes = require('./src/routes/saleRoutes');
 const stockRoutes = require('./src/routes/stockRoutes');
 const reportRoutes = require('./src/routes/reportRoutes');
+const supplierRoutes = require('./src/routes/supplierRoutes');
+const purchaseOrderRoutes = require('./src/routes/purchaseOrderRoutes');
+const expenseRoutes = require('./src/routes/expenseRoutes');
+const customerRoutes = require('./src/routes/customerRoutes');
+const budgetRoutes = require('./src/routes/budgetRoutes');
 
 // Conectar a Base de Datos
 connectDB();
@@ -48,6 +53,11 @@ app.use('/api/products', productRoutes);
 app.use('/api/sales', saleRoutes);
 app.use('/api/stock-movements', stockRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/suppliers', supplierRoutes);
+app.use('/api/purchase-orders', purchaseOrderRoutes);
+app.use('/api/expenses', expenseRoutes);
+app.use('/api/customers', customerRoutes);
+app.use('/api/budgets', budgetRoutes);
 
 app.get('/', (req, res) => {
   res.send('API del Kiosco funcionando...');

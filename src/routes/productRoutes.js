@@ -9,11 +9,15 @@ const {
   adjustStock,
   getLowStockProducts,
   bulkAction,
+  getProductsWithoutMovement,
 } = require('../controllers/productController');
 const { protect, admin } = require('../middlewares/auth');
 
 router.route('/low-stock')
   .get(protect, getLowStockProducts);
+
+router.route('/without-movement')
+  .get(protect, getProductsWithoutMovement);
 
 router.route('/bulk-action')
   .post(protect, admin, bulkAction);

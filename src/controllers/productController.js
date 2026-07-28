@@ -1,5 +1,6 @@
 const Product = require('../models/Product');
 const StockMovement = require('../models/StockMovement');
+const Sale = require('../models/Sale');
 
 // @desc    Obtener productos
 // @route   GET /api/products
@@ -295,6 +296,30 @@ const bulkAction = async (req, res) => {
   }
 };
 
+const getProductsWithoutMovement = async (req, res) => {
+  try {
+    const months = parseInt(req.query.months) || 3;
+    const since = new Date();
+    since.setMonth(since.getMonth() - months);
+
+    const productsWithSales = await Sale.aggregate([
+      { $match: { estado: 'completada', fecha: { $gte: since } } },
+      { $unwind: '$items' },
+      { $group: { _id: '$items.producto' } }
+    ]);
+
+    const soldIds = productsWithSales.map(p => p._id);
+    const products = await Product.find({
+      activo: true,
+      _id: { $nin: soldIds }
+    }).populate('categoria', 'nombre');
+
+    res.json({ months, total: products.length, products });
+  } catch (error) {
+    res.status(500).json({ message: 'Error al obtener productos sin movimiento' });
+  }
+};
+
 module.exports = {
   getProducts,
   getProductById,
@@ -303,5 +328,6 @@ module.exports = {
   deleteProduct,
   adjustStock,
   getLowStockProducts,
-  bulkAction
+  bulkAction,
+  getProductsWithoutMovement
 };
